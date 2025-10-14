@@ -1,0 +1,13 @@
+[package]
+name = "palladin-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+palladin-shared = { workspace = true }
+log = "0.4.28"
+fs-err = { workspace = true }
+sha2 = "0.10"
+parking_lot = "0.12"

@@ -1,0 +1,11 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.49", features = ["derive"] }
+palladin-server = { workspace = true }
+palladin-shared = { workspace = true }
+log = "0.4.28"
+tokio = { workspace = true }

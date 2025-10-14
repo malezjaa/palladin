@@ -1,0 +1,11 @@
+[workspace]
+resolver = "3"
+members = ["cli", "server", "shared"]
+
+[workspace.dependencies]
+palladin-shared = { path = "./shared" }
+palladin-server = { path = "./server" }
+palladin-cli = { path = "./cli" }
+tokio = { version = "1.48.0", features = ["full"] }
+fs-err = "3.1.3"
+axum = "0.8.6"
