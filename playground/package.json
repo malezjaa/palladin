@@ -5,7 +5,8 @@
   "type": "module",
   "dependencies": {
     "react": "^19",
-    "react-dom": "^19"
+    "react-dom": "^19",
+    "react-router": "^7.9.4"
   },
   "devDependencies": {
     "@types/react": "^19",

@@ -1,8 +1,11 @@
+use crate::file::{calculate_content_hash, detect_file_type, File, FileContent, FileType};
 use crate::handle_result;
 use crate::server::errors::error_response;
 use crate::server::Server;
+use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{Response, StatusCode};
+use axum::response::IntoResponse;
 use log::debug;
 use palladin_shared::{canonicalize_with_strip, PalladinError, PalladinResult};
 use sha2::{Digest, Sha256};
@@ -10,49 +13,38 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
-pub struct File {
-    pub path: PathBuf,
-    pub hash: String,
-    pub dirty: bool,
-    pub ty: FileType,
-
-    pub content: FileContent,
+pub async fn serve_file_handler(
+    State(server): State<Arc<Server>>,
+    Path(file): Path<String>,
+) -> impl IntoResponse {
+    Server::serve_file_impl(server, file)
+        .await
+        .unwrap_or_else(|err| err.response())
 }
 
-#[derive(Debug, Clone)]
-pub struct FileContent {
-    pub original: String,
-    pub transformed: String,
-}
-
-#[derive(Debug, Clone)]
-pub enum FileType {
-    CSS,
-
-    JS,
-    JSX,
-
-    TS,
-    TSX,
-
-    HTML,
+pub async fn serve_index_handler(State(server): State<Arc<Server>>) -> impl IntoResponse {
+    Server::serve_index_impl(server)
+        .await
+        .unwrap_or_else(|err| err.response())
 }
 
 impl Server {
-    pub async fn serve_file(
-        State(server): State<Arc<Self>>,
-        Path(file): Path<String>,
-    ) -> Response<String> {
-        match Self::serve_file_impl(server, file).await {
-            Ok(content) => Response::new(content),
-            Err(err) => err.response(),
-        }
-    }
-
-    async fn serve_file_impl(server: Arc<Self>, file: String) -> PalladinResult<String> {
+    async fn serve_file_impl(server: Arc<Self>, file: String) -> PalladinResult<Response<String>> {
         let full_path = canonicalize_with_strip(server.config().root.join(file.clone()))
-            .map_err(|_| (PalladinError::FileNotFound(file.clone())))?;
+            .map_err(|_| (PalladinError::FileNotFound(file.clone())));
+
+        let full_path = match full_path {
+            Ok(path) if path.is_file() => path,
+            _ if file.contains('.') => {
+                // treat as file request that failed
+                return Err(PalladinError::FileNotFound(file.clone()));
+            }
+            _ => {
+                // No extension - assume that it's a route
+                return Self::serve_index_impl(server).await;
+            }
+        };
+
         debug!(
             "Serving file: {:?}",
             full_path
@@ -62,16 +54,34 @@ impl Server {
         );
 
         let file_struct = Self::get_or_load_file(&server, &full_path)?;
-        Ok(file_struct.content.original.clone())
+        Self::build_file_response(&file_struct)
+    }
+
+    async fn serve_index_impl(server: Arc<Self>) -> PalladinResult<Response<String>> {
+        let index_path = canonicalize_with_strip(server.config().root.join("index.html"))
+            .map_err(|_| PalladinError::FileNotFound("index.html".to_string()))?;
+
+        debug!("Serving index.html");
+
+        let file_struct = Self::get_or_load_file(&server, &index_path)?;
+        Self::build_file_response(&file_struct)
+    }
+
+    fn build_file_response(file: &File) -> PalladinResult<Response<String>> {
+        Ok(Response::builder()
+            .header("content-type", file.content_type())
+            .body(file.content.transformed.clone())
+            .unwrap())
     }
 
     fn get_or_load_file(server: &Arc<Self>, path: &PathBuf) -> PalladinResult<File> {
         let mut files = server.files.write();
-        let metadata = fs::metadata(path)
+        let content = fs_err::read_to_string(path)
             .map_err(|_| PalladinError::FileNotFound(path.display().to_string()))?;
-        let content = fs_err::read_to_string(path)?;
-        let hash = calculate_hash(&content);
+        let hash = calculate_content_hash(&content);
         let ty = detect_file_type(path);
+
+        let is_new = !files.contains_key(path);
 
         let entry = files.entry(path.clone()).or_insert_with(|| File {
             path: path.clone(),
@@ -83,40 +93,15 @@ impl Server {
                 transformed: content.clone(),
             },
         });
-        if entry.hash != hash {
+
+        if is_new || entry.hash != hash {
             entry.hash = hash.clone();
             entry.dirty = true;
             entry.content.original = content.clone();
             entry.content.transformed = content.clone();
-        } else {
-            entry.dirty = false;
+            server.rolldown_pipe.transform(entry)?;
         }
 
-        println!("{:?}", entry);
         Ok(entry.clone())
-    }
-}
-
-fn calculate_hash(content: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
-
-fn detect_file_type(path: &PathBuf) -> FileType {
-    match path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "css" => FileType::CSS,
-        "js" => FileType::JS,
-        "jsx" => FileType::JSX,
-        "ts" => FileType::TS,
-        "tsx" => FileType::TSX,
-        "html" => FileType::HTML,
-        _ => FileType::JS,
     }
 }

@@ -1,8 +1,10 @@
 pub struct ColoredLogger;
 
 impl log::Log for ColoredLogger {
-    fn enabled(&self, _metadata: &log::Metadata) -> bool {
-        true
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        let target = metadata.target();
+
+        target.starts_with("palladin") || target == "server" || metadata.level() <= log::Level::Warn
     }
 
     fn log(&self, record: &log::Record) {

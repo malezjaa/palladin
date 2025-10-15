@@ -11,6 +11,9 @@ use std::path::PathBuf;
 #[command(author)]
 #[command(styles = get_styles())]
 pub struct Cli {
+    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
+    pub verbose: u8,
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -27,6 +30,7 @@ pub enum Commands {
         #[arg(short, long, default_value = "8080")]
         port: u16,
 
+        /// Root directory for serving files
         #[arg(long, default_value = ".")]
         root: PathBuf,
     },
