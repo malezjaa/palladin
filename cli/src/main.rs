@@ -33,8 +33,8 @@ async fn main() -> PalladinResult {
 
             info!(target: "server", "initializing...");
 
-            let mut server = Server::new(config);
-            info!(target: "server", "server running on http://{}", server.config().address());
+            let server = Server::new(config)?;
+            info!(target: "server", "server running on http://{}", server.context().address());
 
             server.serve().await
         }

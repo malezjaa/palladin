@@ -1,20 +1,22 @@
 use crate::file::{File, FileType};
+use crate::server::Context;
 use log::debug;
 use palladin_shared::{PalladinError, PalladinResult};
 use rolldown::{Bundler, BundlerOptions};
 use std::env::current_dir;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::runtime::Handle;
 use tokio::task::block_in_place;
 
-pub struct RolldownPipe{
-    root: PathBuf,
+pub struct RolldownPipe {
+    ctx: Arc<Context>,
 }
 
 impl RolldownPipe {
-    pub fn new(root: PathBuf) -> Self {
-        Self {root}
+    pub fn new(ctx: Arc<Context>) -> Self {
+        Self { ctx }
     }
 
     pub fn transform(&self, file: &mut File) -> PalladinResult<()> {
@@ -40,7 +42,11 @@ impl RolldownPipe {
                 let duration = Instant::now();
                 let bundler_options = BundlerOptions {
                     input: Some(vec![file_path.to_string_lossy().to_string().into()]),
-                    cwd: Some(self.root.clone()),
+                    cwd: Some(self.ctx.root().clone()),
+                    tsconfig: self
+                        .ctx
+                        .tsconfig_path()
+                        .map(|p| p.to_string_lossy().to_string()),
                     ..Default::default()
                 };
 
@@ -67,4 +73,3 @@ impl RolldownPipe {
         })
     }
 }
-

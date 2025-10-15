@@ -1,13 +1,11 @@
 use crate::file::{calculate_content_hash, detect_file_type, File, FileContent, FileType};
-use crate::handle_result;
-use crate::server::errors::error_response;
 use crate::server::Server;
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{Response, StatusCode};
 use axum::response::IntoResponse;
 use log::debug;
-use palladin_shared::{canonicalize_with_strip, PalladinError, PalladinResult};
+use palladin_shared::{PalladinError, PalladinResult};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
@@ -30,11 +28,13 @@ pub async fn serve_index_handler(State(server): State<Arc<Server>>) -> impl Into
 
 impl Server {
     async fn serve_file_impl(server: Arc<Self>, file: String) -> PalladinResult<Response<String>> {
-        let full_path = canonicalize_with_strip(server.config().root.join(file.clone()))
-            .map_err(|_| (PalladinError::FileNotFound(file.clone())));
+        let full_path = server
+            .ctx
+            .resolve_path(&file)
+            .map_err(|_| PalladinError::FileNotFound(file.clone()));
 
         let full_path = match full_path {
-            Ok(path) if path.is_file() => path,
+            Ok(path) if path.is_file() && server.ctx.is_within_root(&path) => path,
             _ if file.contains('.') => {
                 // treat as file request that failed
                 return Err(PalladinError::FileNotFound(file.clone()));
@@ -58,7 +58,9 @@ impl Server {
     }
 
     async fn serve_index_impl(server: Arc<Self>) -> PalladinResult<Response<String>> {
-        let index_path = canonicalize_with_strip(server.config().root.join("index.html"))
+        let index_path = server
+            .ctx
+            .resolve_path("index.html")
             .map_err(|_| PalladinError::FileNotFound("index.html".to_string()))?;
 
         debug!("Serving index.html");
