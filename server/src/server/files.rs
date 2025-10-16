@@ -1,13 +1,10 @@
-use crate::file::{calculate_content_hash, detect_file_type, File, FileContent, FileType};
+use crate::file::{calculate_content_hash, detect_file_type, File, FileContent};
 use crate::server::Server;
-use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{Response, StatusCode};
+use axum::http::Response;
 use axum::response::IntoResponse;
 use log::debug;
 use palladin_shared::{PalladinError, PalladinResult};
-use sha2::{Digest, Sha256};
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -26,8 +23,24 @@ pub async fn serve_index_handler(State(server): State<Arc<Server>>) -> impl Into
         .unwrap_or_else(|err| err.response())
 }
 
+pub async fn serve_chunk_handler(
+    State(server): State<Arc<Server>>,
+    Path(chunk_name): Path<String>,
+) -> impl IntoResponse {
+    Server::serve_chunk_impl(server, chunk_name)
+        .unwrap_or_else(|err| err.response())
+}
+
 impl Server {
     async fn serve_file_impl(server: Arc<Self>, file: String) -> PalladinResult<Response<String>> {
+        if file.ends_with(".js") && file.contains('-') {
+            let filename = file.split('/').last().unwrap_or(&file);
+            if server.rolldown_pipe.has_chunk(filename) {
+                debug!("Serving chunk from cache: {}", filename);
+                return Self::serve_chunk_impl(server, filename.to_string());
+            }
+        }
+        
         let full_path = server
             .ctx
             .resolve_path(&file)
@@ -67,6 +80,18 @@ impl Server {
 
         let file_struct = Self::get_or_load_file(&server, &index_path)?;
         Self::build_file_response(&file_struct)
+    }
+
+    fn serve_chunk_impl(server: Arc<Self>, chunk_name: String) -> PalladinResult<Response<String>> {
+        if let Some(content) = server.rolldown_pipe.get_chunk(&chunk_name) {
+            Ok(Response::builder()
+                .header("content-type", "application/javascript")
+                .header("cache-control", "public, max-age=31536000, immutable")
+                .body(content)
+                .unwrap())
+        } else {
+            Err(PalladinError::FileNotFound(format!("Chunk not found: {}", chunk_name)))
+        }
     }
 
     fn build_file_response(file: &File) -> PalladinResult<Response<String>> {

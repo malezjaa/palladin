@@ -12,3 +12,4 @@ fs-err = { workspace = true }
 sha2 = "0.10"
 parking_lot = "0.12"
 rolldown = { workspace = true }
+rolldown_common = { workspace = true }

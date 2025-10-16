@@ -1900,6 +1900,7 @@ dependencies = [
  "palladin-shared",
  "parking_lot",
  "rolldown",
+ "rolldown_common",
  "sha2",
  "tokio",
 ]

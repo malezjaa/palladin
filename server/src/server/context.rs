@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use palladin_shared::{canonicalize_with_strip, PalladinError, PalladinResult};
+use palladin_shared::{canonicalize_with_strip, PalladinResult};
 use palladin_shared::PalladinError::FileNotFound;
 use super::ServerConfig;
 

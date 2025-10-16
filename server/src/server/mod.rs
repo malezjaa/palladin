@@ -2,7 +2,6 @@ mod config;
 mod context;
 pub mod files;
 
-pub use config::*;
 pub use context::*;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -12,7 +11,7 @@ use std::sync::Arc;
 use crate::file::File;
 use crate::rolldown::RolldownPipe;
 pub use crate::server::config::ServerConfig;
-use crate::server::files::{serve_file_handler, serve_index_handler};
+use crate::server::files::{serve_chunk_handler, serve_file_handler, serve_index_handler};
 use axum::routing::get;
 use axum::Router;
 use palladin_shared::PalladinResult;
@@ -50,6 +49,7 @@ impl Server {
         let state = Arc::new(self);
         let app = Router::new()
             .route("/", get(serve_index_handler))
+            .route("/__chunks/{*chunk}", get(serve_chunk_handler))
             .route("/{*file}", get(serve_file_handler))
             .with_state(state);
 
