@@ -34,8 +34,24 @@ async fn main() -> PalladinResult {
             info!(target: "server", "initializing...");
 
             let server = Server::new(config)?;
+            
+            // Create and start file watcher
+            let mut watcher = server.create_watcher()?;
+            watcher.watch(server.context().root())?;
+            
             info!(target: "server", "server running on http://{}", server.context().address());
+            info!(target: "server", "watching for file changes...");
 
+            // Wrap server in Arc for sharing between tasks
+            let server = std::sync::Arc::new(server);
+            
+            // Spawn file watcher task
+            let watcher_server = server.clone();
+            tokio::spawn(async move {
+                watcher_server.watch_files(watcher).await;
+            });
+
+            // Start the HTTP server
             server.serve().await
         }
     }

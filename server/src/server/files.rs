@@ -1,4 +1,5 @@
-use crate::file::{calculate_content_hash, detect_file_type, File, FileContent};
+use crate::file::{calculate_content_hash, detect_file_type, File, FileContent, FileType};
+use crate::hmr::inject_hmr_script;
 use crate::server::Server;
 use axum::extract::{Path, State};
 use axum::http::Response;
@@ -27,8 +28,7 @@ pub async fn serve_chunk_handler(
     State(server): State<Arc<Server>>,
     Path(chunk_name): Path<String>,
 ) -> impl IntoResponse {
-    Server::serve_chunk_impl(server, chunk_name)
-        .unwrap_or_else(|err| err.response())
+    Server::serve_chunk_impl(server, chunk_name).unwrap_or_else(|err| err.response())
 }
 
 impl Server {
@@ -40,7 +40,7 @@ impl Server {
                 return Self::serve_chunk_impl(server, filename.to_string());
             }
         }
-        
+
         let full_path = server
             .ctx
             .resolve_path(&file)
@@ -90,14 +90,23 @@ impl Server {
                 .body(content)
                 .unwrap())
         } else {
-            Err(PalladinError::FileNotFound(format!("Chunk not found: {}", chunk_name)))
+            Err(PalladinError::FileNotFound(format!(
+                "Chunk not found: {}",
+                chunk_name
+            )))
         }
     }
 
     fn build_file_response(file: &File) -> PalladinResult<Response<String>> {
+        let mut content = file.content.transformed.clone();
+
+        if file.ty == FileType::HTML {
+            content = inject_hmr_script(&content);
+        }
+
         Ok(Response::builder()
             .header("content-type", file.content_type())
-            .body(file.content.transformed.clone())
+            .body(content)
             .unwrap())
     }
 

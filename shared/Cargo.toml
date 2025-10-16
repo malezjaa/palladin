@@ -10,3 +10,4 @@ fs-err = { workspace = true }
 axum = { workspace = true }
 rolldown = { workspace = true }
 rolldown_error = { workspace = true }
+notify = { workspace = true }

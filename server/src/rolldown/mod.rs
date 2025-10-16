@@ -81,7 +81,7 @@ impl RolldownPipe {
                     entry_filenames: Some("[name].js".to_string().into()),
                     chunk_filenames: Some("[name]-[hash].js".to_string().into()),
 
-                    dir: Some("dist".to_string()),
+                    dir: Some(ctx.build_dir().to_string_lossy().to_string()),
 
                     format: Some(OutputFormat::Esm),
 
@@ -89,6 +89,7 @@ impl RolldownPipe {
 
                     experimental: Some(ExperimentalOptions {
                         strict_execution_order: Some(true),
+                        incremental_build: Some(true),
                         ..Default::default()
                     }),
 

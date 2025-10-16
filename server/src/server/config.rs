@@ -9,16 +9,19 @@ pub struct ServerConfig {
     pub port: u16,
     /// The root directory from which files will be served.
     pub root: PathBuf,
+    /// The output directory for bundled files (relative to root).
+    pub build_dir: PathBuf,
 }
 
 impl ServerConfig {
     /// Creates a new `ServerConfig` with default values:
-    /// host: `127.0.0.1`, port: `8080`.
+    /// host: `127.0.0.1`, port: `8080`, build_dir: `dist`.
     pub fn new() -> Self {
         Self {
             host: "127.0.0.1".to_string(),
             port: 8080,
             root: PathBuf::from("."),
+            build_dir: PathBuf::from("dist"),
         }
     }
 
@@ -38,6 +41,12 @@ impl ServerConfig {
     #[inline(always)]
     pub fn root(&self) -> &PathBuf {
         &self.root
+    }
+
+    /// Returns a reference to the build directory.
+    #[inline(always)]
+    pub fn build_dir(&self) -> &PathBuf {
+        &self.build_dir
     }
 
     /// Returns a new `ServerConfig` with the specified port.
@@ -61,6 +70,14 @@ impl ServerConfig {
     #[inline(always)]
     pub fn with_root(mut self, root: PathBuf) -> Self {
         self.root = root;
+        self
+    }
+
+    /// Returns a new `ServerConfig` with the specified build directory.
+    #[must_use]
+    #[inline(always)]
+    pub fn with_build_dir(mut self, build_dir: PathBuf) -> Self {
+        self.build_dir = build_dir;
         self
     }
 

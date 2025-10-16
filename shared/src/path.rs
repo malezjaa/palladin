@@ -1,5 +1,5 @@
-use anyhow::Result;
 use std::path::{Path, PathBuf};
+use crate::PalladinResult;
 
 /// strips the same root from a path using `reference_path` as the common base
 pub fn strip_same_root(path: &Path, reference_path: &Path) -> PathBuf {
@@ -26,7 +26,7 @@ pub fn strip_same_root(path: &Path, reference_path: &Path) -> PathBuf {
 /// # Errors
 ///
 /// Returns an error if the path cannot be canonicalized
-pub fn canonicalize_with_strip<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
+pub fn canonicalize_with_strip<P: AsRef<Path>>(path: P) -> PalladinResult<PathBuf> {
     let canonical = fs_err::canonicalize(path)?;
     Ok(strip_windows_long_path_prefix(canonical))
 }
@@ -55,7 +55,7 @@ fn strip_windows_long_path_prefix(path: PathBuf) -> PathBuf {
 }
 
 /// Creates a directory and all its parent components if they are missing.
-pub fn create_dir_all<P: AsRef<Path>>(path: P) -> Result<()> {
+pub fn create_dir_all<P: AsRef<Path>>(path: P) -> PalladinResult {
     let path = path.as_ref();
     if !path.exists() {
         fs_err::create_dir_all(path)?;

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use fs_err::create_dir_all;
 use palladin_shared::{canonicalize_with_strip, PalladinResult};
 use palladin_shared::PalladinError::FileNotFound;
 use super::ServerConfig;
@@ -12,6 +13,8 @@ pub struct Context {
     config: ServerConfig,
     /// The canonicalized root directory path
     root: PathBuf,
+    /// The canonicalized build directory path (absolute path)
+    build_dir: PathBuf,
     /// The path to the tsconfig.json file, if it exists
     tsconfig_path: Option<PathBuf>,
 }
@@ -27,6 +30,14 @@ impl Context {
         let root = canonicalize_with_strip(&config.root)
             .map_err(|_| FileNotFound(config.root.to_string_lossy().to_string()))?;
         
+        let build_dir_path = root.join(&config.build_dir);
+        if !build_dir_path.exists() {
+            create_dir_all(&build_dir_path)
+                .map_err(|e| FileNotFound(format!("Failed to create build dir: {}", e)))?;
+        }
+        let build_dir = canonicalize_with_strip(&build_dir_path)
+            .map_err(|_| FileNotFound(build_dir_path.to_string_lossy().to_string()))?;
+        
         let tsconfig_path = {
             let path = root.join("tsconfig.json");
             if path.exists() {
@@ -39,6 +50,7 @@ impl Context {
         Ok(Self {
             config,
             root,
+            build_dir,
             tsconfig_path,
         })
     }
@@ -53,6 +65,12 @@ impl Context {
     #[inline(always)]
     pub fn root(&self) -> &PathBuf {
         &self.root
+    }
+
+    /// Returns a reference to the canonicalized build directory.
+    #[inline(always)]
+    pub fn build_dir(&self) -> &PathBuf {
+        &self.build_dir
     }
 
     /// Returns the host address.
