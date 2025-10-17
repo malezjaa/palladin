@@ -11,6 +11,8 @@ pub struct ServerConfig {
     pub root: PathBuf,
     /// The output directory for bundled files (relative to root).
     pub build_dir: PathBuf,
+    /// The entrypoint file to bundle (e.g., "src/index.tsx")
+    pub entrypoint: PathBuf,
 }
 
 impl ServerConfig {
@@ -22,6 +24,7 @@ impl ServerConfig {
             port: 8080,
             root: PathBuf::from("."),
             build_dir: PathBuf::from("dist"),
+            entrypoint: PathBuf::from("src/index.tsx"),
         }
     }
 
@@ -47,6 +50,12 @@ impl ServerConfig {
     #[inline(always)]
     pub fn build_dir(&self) -> &PathBuf {
         &self.build_dir
+    }
+
+    /// Returns a reference to the entrypoint.
+    #[inline(always)]
+    pub fn entrypoint(&self) -> &PathBuf {
+        &self.entrypoint
     }
 
     /// Returns a new `ServerConfig` with the specified port.
@@ -78,6 +87,14 @@ impl ServerConfig {
     #[inline(always)]
     pub fn with_build_dir(mut self, build_dir: PathBuf) -> Self {
         self.build_dir = build_dir;
+        self
+    }
+
+    /// Returns a new `ServerConfig` with the specified entrypoint.
+    #[must_use]
+    #[inline(always)]
+    pub fn with_entrypoint(mut self, entrypoint: PathBuf) -> Self {
+        self.entrypoint = entrypoint;
         self
     }
 

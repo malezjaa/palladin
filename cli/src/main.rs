@@ -6,7 +6,8 @@ use crate::logger::LOGGER;
 use clap::Parser;
 use log::{info, LevelFilter};
 use palladin_server::server::{Server, ServerConfig};
-use palladin_shared::PalladinResult;
+use palladin_shared::{canonicalize_with_strip, PalladinResult};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> PalladinResult {
@@ -25,33 +26,38 @@ async fn main() -> PalladinResult {
         .expect("Failed to set logger");
 
     match cli.command {
-        Commands::Dev { host, port, root } => {
-            let config = ServerConfig::new()
+        Commands::Dev {
+            host,
+            port,
+            root,
+            entrypoint,
+        } => {
+            let mut config = ServerConfig::new()
                 .with_host(host)
                 .with_port(port)
                 .with_root(root);
 
+            if let Some(entry) = entrypoint {
+                config = config.with_entrypoint(canonicalize_with_strip(entry)?);
+            }
+
             info!(target: "server", "initializing...");
 
             let server = Server::new(config)?;
-            
-            // Create and start file watcher
+
             let mut watcher = server.create_watcher()?;
             watcher.watch(server.context().root())?;
-            
+
             info!(target: "server", "server running on http://{}", server.context().address());
             info!(target: "server", "watching for file changes...");
 
-            // Wrap server in Arc for sharing between tasks
-            let server = std::sync::Arc::new(server);
-            
-            // Spawn file watcher task
+            let server = Arc::new(server);
+
             let watcher_server = server.clone();
             tokio::spawn(async move {
                 watcher_server.watch_files(watcher).await;
             });
 
-            // Start the HTTP server
             server.serve().await
         }
     }

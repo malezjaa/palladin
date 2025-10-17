@@ -5,7 +5,6 @@ use std::path::PathBuf;
 pub struct File {
     pub path: PathBuf,
     pub hash: String,
-    pub dirty: bool,
     pub ty: FileType,
 
     pub content: FileContent,

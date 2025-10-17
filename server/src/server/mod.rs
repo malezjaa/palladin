@@ -35,12 +35,18 @@ impl Server {
     pub fn new(config: ServerConfig) -> PalladinResult<Self> {
         let ctx = Arc::new(Context::new(config)?);
 
-        Ok(Self {
+        let server = Self {
             ctx: ctx.clone(),
             files: RwLock::new(HashMap::new()),
             rolldown_pipe: RolldownPipe::new(ctx),
             hmr_tx: create_hmr_channel(),
-        })
+        };
+
+        info!("Bundling entrypoint...");
+        server.rolldown_pipe.bundle_entrypoint()?;
+        info!("Entrypoint bundled successfully");
+
+        Ok(server)
     }
 
     #[inline(always)]
@@ -86,15 +92,10 @@ impl Server {
                 match event.kind {
                     EventKind::Create(_) | EventKind::Modify(_) => {
                         for path in event.paths {
+                            println!("{:?}", path);
+                            println!("{:?}", self.ctx.is_within_root(&path));
                             if self.ctx.is_within_root(&path) {
                                 self.invalidate_file(&path);
-                            }
-                        }
-                    }
-                    EventKind::Remove(_) => {
-                        for path in event.paths {
-                            if self.ctx.is_within_root(&path) {
-                                self.remove_file(&path);
                             }
                         }
                     }
@@ -114,17 +115,12 @@ impl Server {
             .and_then(|root| path.strip_prefix(root).ok())
             .unwrap_or(path);
 
-        let mut files = self.files.write();
-        if let Some(file) = files.get_mut(path) {
-            file.dirty = true;
-            debug!("File invalidated: {:?}", relative_path);
+        debug!("Rebuilding entrypoint...");
+        if let Err(e) = self.rolldown_pipe.bundle_entrypoint() {
+            log::error!("Failed to rebuild entrypoint: {:?}", e);
         } else {
-            files.remove(path);
-            debug!("File removed from cache: {:?}", relative_path);
+            debug!("Entrypoint rebuilt successfully");
         }
-        drop(files);
-
-        self.rolldown_pipe.clear_chunks();
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -139,17 +135,5 @@ impl Server {
         });
 
         info!("File changed: {}", relative_path.display());
-    }
-
-    fn remove_file(&self, path: &PathBuf) {
-        let mut files = self.files.write();
-        files.remove(path);
-        drop(files);
-
-        self.rolldown_pipe.clear_chunks();
-
-        let _ = self.hmr_tx.send(HmrMessage::FullReload);
-
-        info!("File removed: {:?}", path);
     }
 }

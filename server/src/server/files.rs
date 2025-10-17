@@ -122,7 +122,6 @@ impl Server {
         let entry = files.entry(path.clone()).or_insert_with(|| File {
             path: path.clone(),
             hash: hash.clone(),
-            dirty: false,
             ty: ty.clone(),
             content: FileContent {
                 original: content.clone(),
@@ -132,7 +131,6 @@ impl Server {
 
         if is_new || entry.hash != hash {
             entry.hash = hash.clone();
-            entry.dirty = true;
             entry.content.original = content.clone();
             entry.content.transformed = content.clone();
             server.rolldown_pipe.transform(entry)?;

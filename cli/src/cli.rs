@@ -33,6 +33,10 @@ pub enum Commands {
         /// Root directory for serving files
         #[arg(long, default_value = ".")]
         root: PathBuf,
+
+        /// Entrypoint file to bundle (e.g., src/index.tsx)
+        #[arg(short, long)]
+        entrypoint: Option<PathBuf>,
     },
 }
 

@@ -30,6 +30,19 @@ impl RolldownPipe {
         }
     }
 
+    pub fn bundle_entrypoint(&self) -> PalladinResult<()> {
+        let entrypoint = self.ctx.config().entrypoint();
+
+        let full_path = self.ctx.resolve_path(entrypoint).map_err(|_| {
+            PalladinError::FileNotFound(format!("Entrypoint not found: {:?}", entrypoint))
+        })?;
+
+        let (_transformed, chunks) = self.transform_with_rolldown(&full_path)?;
+        self.chunk_manager.store_chunks(chunks);
+
+        Ok(())
+    }
+
     pub fn transform(&self, file: &mut File) -> PalladinResult<()> {
         match file.ty {
             FileType::CSS | FileType::HTML => {
