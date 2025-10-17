@@ -216,13 +216,6 @@ impl FileWatcher {
     where
         F: FnMut(Event),
     {
-        use std::collections::HashMap;
-        use std::time::{SystemTime, UNIX_EPOCH};
-        use notify::EventKind;
-        
-        let mut last_event_times: HashMap<PathBuf, u128> = HashMap::new();
-        let debounce_ms = 100;
-        
         while let Some(res) = self.try_recv_event() {
             match res {
                 Ok(event) => {
@@ -232,29 +225,6 @@ impl FileWatcher {
                         .any(|path| !self.is_ignored_path(path) && self.is_allowed_file(path));
 
                     if should_process {
-                        if matches!(event.kind, EventKind::Modify(_)) {
-                            let now = SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap()
-                                .as_millis();
-                            
-                            let all_duplicates = event.paths.iter().all(|path| {
-                                if let Some(&last_time) = last_event_times.get(path) {
-                                    now - last_time < debounce_ms
-                                } else {
-                                    false
-                                }
-                            });
-                            
-                            if all_duplicates {
-                                continue;
-                            }
-                            
-                            for path in &event.paths {
-                                last_event_times.insert(path.clone(), now);
-                            }
-                        }
-                        
                         callback(event);
                     }
                 }

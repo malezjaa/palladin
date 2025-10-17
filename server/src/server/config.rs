@@ -11,7 +11,7 @@ pub struct ServerConfig {
     pub root: PathBuf,
     /// The output directory for bundled files (relative to root).
     pub build_dir: PathBuf,
-    /// The entrypoint file to bundle (e.g., "src/index.tsx")
+    /// The entrypoint file to the bundle (e.g., "src/index.tsx")
     pub entrypoint: PathBuf,
 }
 

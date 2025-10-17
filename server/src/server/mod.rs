@@ -8,9 +8,6 @@ use crate::rolldown::RolldownPipe;
 pub use crate::server::config::ServerConfig;
 use crate::server::files::{serve_chunk_handler, serve_file_handler, serve_index_handler};
 use crate::watcher::FileWatcher;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
-use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 pub use context::*;
@@ -87,11 +84,9 @@ impl Server {
 
         let mut pending_changes = std::collections::HashSet::new();
         let mut last_change_time: Option<SystemTime> = None;
-        let debounce_duration = Duration::from_millis(150);
+        let debounce_duration = Duration::from_millis(100);
 
         loop {
-            let mut had_events = false;
-
             watcher.process_filtered_events(|event| {
                 use notify::EventKind;
 
@@ -101,13 +96,13 @@ impl Server {
                             if self.ctx.is_within_root(&path) {
                                 pending_changes.insert(path);
                                 last_change_time = Some(SystemTime::now());
-                                had_events = true;
                             }
                         }
                     }
                     _ => {}
                 }
             });
+
             if let Some(last_time) = last_change_time {
                 if !pending_changes.is_empty() {
                     let elapsed = SystemTime::now()
@@ -124,7 +119,7 @@ impl Server {
                 }
             }
 
-            sleep(Duration::from_millis(50)).await;
+            sleep(Duration::from_millis(10)).await;
         }
     }
 
@@ -148,6 +143,27 @@ impl Server {
 
         self.files.write().clear();
 
-        let _ = self.hmr_tx.send(HmrMessage::FullReload);
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let updates: Vec<Update> = paths
+            .iter()
+            .filter_map(|path| {
+                self.ctx
+                    .root()
+                    .parent()
+                    .and_then(|root| path.strip_prefix(root).ok())
+                    .map(|p| Update {
+                        path: format!("/{}", p.to_string_lossy().replace('\\', "/")),
+                        timestamp,
+                    })
+            })
+            .collect();
+
+        if !updates.is_empty() {
+            let _ = self.hmr_tx.send(HmrMessage::Update { updates });
+        }
     }
 }

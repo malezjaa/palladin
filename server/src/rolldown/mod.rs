@@ -10,7 +10,6 @@ use rolldown_common::{
     AdvancedChunksOptions, MatchGroup, MatchGroupName, MatchGroupTest, OutputFormat,
 };
 use std::collections::HashMap;
-use std::io::BufRead;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;

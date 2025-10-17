@@ -7,6 +7,7 @@
     let socket;
     let reconnectTimer;
     let isReconnecting = false;
+    let isFirstConnection = true;
 
     function connect() {
         socket = new WebSocket(socketUrl);
@@ -48,7 +49,13 @@
     function handleMessage(message) {
         switch (message.type) {
             case 'connected':
-                console.log('[HMR] Ready');
+                if (isFirstConnection) {
+                    console.log('[HMR] Ready');
+                    isFirstConnection = false;
+                } else {
+                    console.log('[HMR] Server restarted, reloading page...');
+                    window.location.reload();
+                }
                 break;
 
             case 'update':
@@ -67,52 +74,76 @@
     }
 
     function handleUpdate(updates) {
-        let needsReload = false;
-
-        updates.forEach(update => {
+        const hasJsChanges = updates.some(update => {
             const path = update.path;
-
-            if (path.endsWith('.css')) {
-                // Hot reload CSS without page refresh
-                if (reloadCSS(path)) {
-                    console.log('[HMR] CSS hot reloaded:', path);
-                } else {
-                    needsReload = true;
-                }
-            } else if (path.endsWith('.js') || path.endsWith('.jsx') || path.endsWith('.ts') || path.endsWith('.tsx')) {
-                // For JS/TS files, we need to reload
-                // In the future, this could be enhanced with proper HMR
-                needsReload = true;
-            } else if (path.endsWith('.html')) {
-                // HTML changes require a full reload
-                needsReload = true;
-            } else {
-                // Other file types, reload to be safe
-                needsReload = true;
-            }
+            return path.endsWith('.js') || path.endsWith('.jsx') || 
+                   path.endsWith('.ts') || path.endsWith('.tsx');
         });
 
-        if (needsReload) {
-            console.log('[HMR] Reloading page...');
-            window.location.reload();
+        const hasCssChanges = updates.some(update => update.path.endsWith('.css'));
+        const hasHtmlChanges = updates.some(update => update.path.endsWith('.html'));
+
+        if (hasCssChanges) {
+            updates.forEach(update => {
+                if (update.path.endsWith('.css')) {
+                    reloadCSS(update.path);
+                    console.log('[HMR] CSS hot reloaded:', update.path);
+                }
+            });
+        }
+
+        if (hasJsChanges || hasHtmlChanges) {
+            console.log('[HMR] Module changed, reloading scripts...');
+            reloadJavaScript();
         }
     }
 
     function reloadCSS(path) {
-        let updated = false;
         const links = document.querySelectorAll('link[rel="stylesheet"]');
+        let reloaded = false;
         
         links.forEach(link => {
             const href = link.getAttribute('href');
-            if (href && (href === path || href.includes(path.replace(/^\//, '')))) {
+            if (href) {
                 const url = new URL(link.href, window.location.origin);
                 url.searchParams.set('t', Date.now().toString());
                 link.href = url.toString();
-                updated = true;
+                reloaded = true;
             }
         });
 
-        return updated;
+        return reloaded;
+    }
+
+    function reloadJavaScript() {
+        const scripts = document.querySelectorAll('script[type="module"]');
+        const scriptUrls = [];
+        
+        scripts.forEach(script => {
+            if (script.src && !script.src.includes('__hmr')) {
+                scriptUrls.push(script.src);
+            }
+        });
+
+        if (scriptUrls.length === 0) {
+            window.location.reload();
+            return;
+        }
+
+        scripts.forEach(script => {
+            if (script.src && !script.src.includes('__hmr')) {
+                script.remove();
+            }
+        });
+
+        scriptUrls.forEach(url => {
+            const script = document.createElement('script');
+            script.type = 'module';
+            const newUrl = new URL(url);
+            newUrl.searchParams.set('t', Date.now().toString());
+            script.src = newUrl.toString();
+            document.body.appendChild(script);
+        });
     }
 
     // Connect when page loads
