@@ -3,47 +3,40 @@ mod context;
 pub mod files;
 
 use crate::file::File;
-use crate::hmr::{create_hmr_channel, ws_handler, HmrBroadcaster, HmrMessage, Update};
-use crate::rolldown::RolldownPipe;
+use crate::rolldown::{ChunkManager, ChunkProcessor, MainAsset, create_bundler};
 pub use crate::server::config::ServerConfig;
 use crate::server::files::{serve_chunk_handler, serve_file_handler, serve_index_handler};
-use crate::watcher::FileWatcher;
-use axum::routing::get;
+use anyhow::anyhow;
 use axum::Router;
+use axum::routing::get;
 pub use context::*;
-use log::{debug, info};
+use log::{error, warn};
 use palladin_shared::PalladinResult;
 use parking_lot::RwLock;
+use rolldown::dev::{DevOptions, RebuildStrategy};
+use rolldown::{BundleOutput, DevEngine};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
-use tokio::time::sleep;
 
 pub struct Server {
     pub ctx: Arc<Context>,
     pub files: RwLock<HashMap<PathBuf, File>>,
-    pub rolldown_pipe: RolldownPipe,
-    pub hmr_tx: HmrBroadcaster,
+    chunks: ChunkManager,
+    entry_asset: RwLock<Option<MainAsset>>,
 }
 
 impl Server {
     pub fn new(config: ServerConfig) -> PalladinResult<Self> {
         let ctx = Arc::new(Context::new(config)?);
 
-        let server = Self {
+        Ok(Self {
             ctx: ctx.clone(),
             files: RwLock::new(HashMap::new()),
-            rolldown_pipe: RolldownPipe::new(ctx),
-            hmr_tx: create_hmr_channel(),
-        };
-
-        info!("Bundling entrypoint...");
-        server.rolldown_pipe.bundle_entrypoint()?;
-        info!("Entrypoint bundled successfully");
-
-        Ok(server)
+            chunks: ChunkManager::new(),
+            entry_asset: RwLock::new(None),
+        })
     }
 
     #[inline(always)]
@@ -56,114 +49,102 @@ impl Server {
         self.ctx.config()
     }
 
+    async fn spawn_engine(self: Arc<Self>) -> PalladinResult {
+        let options = create_bundler(self.ctx.clone());
+        let server_for_output = Arc::clone(&self);
+
+        let dev_engine = DevEngine::new(
+            options,
+            DevOptions {
+                rebuild_strategy: Some(RebuildStrategy::Always),
+                on_output: Some(Arc::new(move |result| {
+                    let server = Arc::clone(&server_for_output);
+                    match result {
+                        Ok(bundle_output) => {
+                            for warning in &bundle_output.warnings {
+                                warn!("rolldown warning: {warning:#?}");
+                            }
+
+                            if let Err(err) = server.handle_bundle_output(bundle_output) {
+                                error!("failed to process rolldown output: {err:#}");
+                            }
+                        }
+                        Err(err) => {
+                            error!("rolldown build error: {err:#?}");
+                        }
+                    }
+                })),
+                on_hmr_updates: Some(Arc::new(|result| match result {
+                    Ok((updates, changed_files)) => {
+                        println!("HMR updates: {updates:#?} due to {changed_files:#?}");
+                    }
+                    Err(e) => {
+                        eprintln!("HMR error: {e:#?}");
+                    }
+                })),
+                ..Default::default()
+            },
+        )?;
+
+        dev_engine.run().await?;
+
+        dev_engine
+            .wait_for_build_driver_service_close()
+            .await
+            .map_err(Into::into)
+    }
+
     pub async fn serve(self: Arc<Self>) -> PalladinResult {
         let tcp = TcpListener::bind(self.ctx.address()).await?;
         let app = Router::new()
             .route("/", get(serve_index_handler))
-            .route("/__hmr", get(ws_handler))
             .route("/__chunks/{*chunk}", get(serve_chunk_handler))
             .route("/{*file}", get(serve_file_handler))
-            .with_state(self);
+            .with_state(self.clone());
+
+        tokio::spawn(self.spawn_engine());
 
         axum::serve(tcp, app).await.map_err(Into::into)
     }
 
-    pub fn create_watcher(&self) -> PalladinResult<FileWatcher> {
-        let mut watcher = FileWatcher::new()?;
-        let build_dir = self.ctx.build_dir();
-        debug!("Adding ignored path: {:?}", build_dir);
-        watcher.add_ignored_path(build_dir)?;
-        Ok(watcher)
+    fn handle_bundle_output(self: &Arc<Self>, bundle_output: BundleOutput) -> PalladinResult {
+        let entrypoint_path = self.ctx.entrypoint().clone();
+
+        let (main_asset, chunks) =
+            ChunkProcessor::process_assets(&bundle_output.assets, &entrypoint_path)
+                .map_err(|err| anyhow!(err))?;
+
+        self.chunks.clear();
+        self.chunks.store_chunks(chunks);
+
+        {
+            let mut entry_asset = self.entry_asset.write();
+            *entry_asset = Some(main_asset.clone());
+        }
+
+        self.apply_main_asset(&entrypoint_path, &main_asset)
     }
 
-    pub async fn watch_files(self: &Arc<Self>, watcher: FileWatcher) {
-        debug!(
-            "File watcher started. Ignored paths: {:?}",
-            watcher.ignored_paths()
-        );
+    fn apply_main_asset(
+        self: &Arc<Self>,
+        entrypoint_path: &PathBuf,
+        asset: &MainAsset,
+    ) -> PalladinResult {
+        let _ = Self::get_or_load_file(self, entrypoint_path)?;
 
-        let mut pending_changes = std::collections::HashSet::new();
-        let mut last_change_time: Option<SystemTime> = None;
-        let debounce_duration = Duration::from_millis(100);
-
-        loop {
-            watcher.process_filtered_events(|event| {
-                use notify::EventKind;
-
-                match event.kind {
-                    EventKind::Create(_) | EventKind::Modify(_) => {
-                        for path in event.paths {
-                            if self.ctx.is_within_root(&path) {
-                                pending_changes.insert(path);
-                                last_change_time = Some(SystemTime::now());
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            });
-
-            if let Some(last_time) = last_change_time {
-                if !pending_changes.is_empty() {
-                    let elapsed = SystemTime::now()
-                        .duration_since(last_time)
-                        .unwrap_or(Duration::ZERO);
-
-                    if elapsed >= debounce_duration {
-                        let changed_files: Vec<PathBuf> = pending_changes.drain().collect();
-                        if !changed_files.is_empty() {
-                            self.handle_file_changes(changed_files);
-                        }
-                        last_change_time = None;
-                    }
-                }
-            }
-
-            sleep(Duration::from_millis(10)).await;
+        let mut files = self.files.write();
+        if let Some(entry) = files.get_mut(entrypoint_path) {
+            entry.content.transformed = asset.content.clone();
         }
+
+        Ok(())
     }
 
-    fn handle_file_changes(&self, paths: Vec<PathBuf>) {
-        for path in &paths {
-            let relative_path = self
-                .ctx
-                .root()
-                .parent()
-                .and_then(|root| path.strip_prefix(root).ok())
-                .unwrap_or(path);
-            info!("File changed: {}", relative_path.display());
-        }
+    pub(crate) fn entry_asset(&self) -> Option<MainAsset> {
+        self.entry_asset.read().clone()
+    }
 
-        info!("Rebuilding entrypoint...");
-        if let Err(e) = self.rolldown_pipe.bundle_entrypoint() {
-            log::error!("Failed to rebuild entrypoint: {:?}", e);
-            return;
-        }
-        info!("Entrypoint rebuilt successfully");
-
-        self.files.write().clear();
-
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        let updates: Vec<Update> = paths
-            .iter()
-            .filter_map(|path| {
-                self.ctx
-                    .root()
-                    .parent()
-                    .and_then(|root| path.strip_prefix(root).ok())
-                    .map(|p| Update {
-                        path: format!("/{}", p.to_string_lossy().replace('\\', "/")),
-                        timestamp,
-                    })
-            })
-            .collect();
-
-        if !updates.is_empty() {
-            let _ = self.hmr_tx.send(HmrMessage::Update { updates });
-        }
+    pub(crate) fn chunk_manager(&self) -> &ChunkManager {
+        &self.chunks
     }
 }

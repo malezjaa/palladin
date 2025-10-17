@@ -17,7 +17,19 @@ pub enum PalladinError {
     NotifyError(#[from] notify::Error),
 
     #[error("Rolldown Error: {0}")]
-    RolldownError(BatchedBuildDiagnostic),
+    RolldownError(#[from] BatchedBuildDiagnostic),
+
+    #[error("Build error: {0}")]
+    Build(#[from] anyhow::Error),
+
+    #[error("Watcher error: {0}")]
+    Watcher(String),
+
+    #[error("Engine is closed")]
+    EngineClosed,
+
+    #[error("Service communication error: {0}")]
+    ServiceCommunication(String),
 }
 
 pub type PalladinResult<T = ()> = Result<T, PalladinError>;
@@ -31,12 +43,7 @@ impl PalladinError {
             PalladinError::FileNotFound(file) => {
                 (format!("File not found: {}", file), StatusCode::NOT_FOUND)
             }
-            PalladinError::RolldownError(e) => (
-                "Rolldown Error: ".to_string() + &e.to_string(),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ),
-            PalladinError::NotifyError(e) => (e.to_string(), StatusCode::INTERNAL_SERVER_ERROR),
-            PalladinError::Utf8Error(e) => (e.to_string(), StatusCode::INTERNAL_SERVER_ERROR),
+            _ => (self.to_string(), StatusCode::INTERNAL_SERVER_ERROR),
         };
 
         Response::builder()

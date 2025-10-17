@@ -13,6 +13,11 @@ sha2 = "0.10"
 parking_lot = "0.12"
 rolldown = { workspace = true }
 rolldown_common = { workspace = true }
-notify = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
+rolldown_watcher = { git = "https://github.com/rolldown/rolldown" }
+rolldown_utils = { git = "https://github.com/rolldown/rolldown" }
+rolldown_error = { git = "https://github.com/rolldown/rolldown" }
+anyhow = "1.0.100"
+futures = "0.3.31"
+tracing = "0.1.41"
+arcstr = "1.2.0"
+sugar_path = "1.2.0"

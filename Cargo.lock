@@ -1927,18 +1927,23 @@ dependencies = [
 name = "palladin-server"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "arcstr",
  "axum",
  "fs-err",
+ "futures",
  "log",
- "notify 8.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "palladin-shared",
  "parking_lot",
  "rolldown",
  "rolldown_common",
- "serde",
- "serde_json",
+ "rolldown_error",
+ "rolldown_utils",
+ "rolldown_watcher",
  "sha2",
+ "sugar_path",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

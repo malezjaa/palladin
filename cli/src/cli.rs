@@ -36,7 +36,7 @@ pub enum Commands {
 
         /// Entrypoint file to bundle (e.g., src/index.tsx)
         #[arg(short, long)]
-        entrypoint: Option<PathBuf>,
+        entrypoint: PathBuf,
     },
 }
 

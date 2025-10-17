@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use crate::PalladinResult;
+use std::path::{Path, PathBuf};
 
 /// strips the same root from a path using `reference_path` as the common base
 pub fn strip_same_root(path: &Path, reference_path: &Path) -> PathBuf {

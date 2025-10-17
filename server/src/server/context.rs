@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use fs_err::create_dir_all;
-use palladin_shared::{canonicalize_with_strip, PalladinResult};
-use palladin_shared::PalladinError::FileNotFound;
 use super::ServerConfig;
+use fs_err::create_dir_all;
+use palladin_shared::PalladinError::FileNotFound;
+use palladin_shared::{canonicalize_with_strip, PalladinResult};
 
 /// Context holds all the application-wide data including configuration,
 /// canonicalized paths, and runtime state.
@@ -26,10 +26,10 @@ impl Context {
     /// # Errors
     ///
     /// Returns an error if the root path cannot be canonicalized.
-    pub fn new(config: ServerConfig) -> PalladinResult<Self> {
+    pub fn new(mut config: ServerConfig) -> PalladinResult<Self> {
         let root = canonicalize_with_strip(&config.root)
             .map_err(|_| FileNotFound(config.root.to_string_lossy().to_string()))?;
-        
+
         let build_dir_path = root.join(&config.build_dir);
         if !build_dir_path.exists() {
             create_dir_all(&build_dir_path)
@@ -37,15 +37,14 @@ impl Context {
         }
         let build_dir = canonicalize_with_strip(&build_dir_path)
             .map_err(|_| FileNotFound(build_dir_path.to_string_lossy().to_string()))?;
-        
+
         let tsconfig_path = {
             let path = root.join("tsconfig.json");
-            if path.exists() {
-                Some(path)
-            } else {
-                None
-            }
+            if path.exists() { Some(path) } else { None }
         };
+
+        let entrypoint_path = canonicalize_with_strip(&config.entrypoint)?;
+        config.entrypoint = entrypoint_path;
 
         Ok(Self {
             config,
@@ -83,6 +82,12 @@ impl Context {
     #[inline(always)]
     pub fn port(&self) -> u16 {
         self.config.port()
+    }
+
+    /// Returns the entrypoint path.
+    #[inline(always)]
+    pub fn entrypoint(&self) -> &PathBuf {
+        &self.config.entrypoint
     }
 
     /// Returns the full address in the format `host:port`.

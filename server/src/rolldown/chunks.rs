@@ -2,13 +2,26 @@ use log::debug;
 use parking_lot::RwLock;
 use rolldown_common::Output;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+#[derive(Debug, Clone)]
+pub struct ChunkAsset {
+    pub content: String,
+    pub content_type: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MainAsset {
+    pub filename: String,
+    pub content: String,
+    pub content_type: String,
+}
 
 /// Manages chunk storage and retrieval
 pub struct ChunkManager {
     /// Cache for storing chunk dependencies (filename -> content)
-    chunks: Arc<RwLock<HashMap<String, String>>>,
+    chunks: Arc<RwLock<HashMap<String, ChunkAsset>>>,
 }
 
 impl ChunkManager {
@@ -18,7 +31,7 @@ impl ChunkManager {
         }
     }
 
-    pub fn store_chunks(&self, chunks: HashMap<String, String>) {
+    pub fn store_chunks(&self, chunks: HashMap<String, ChunkAsset>) {
         if chunks.is_empty() {
             return;
         }
@@ -33,10 +46,27 @@ impl ChunkManager {
         );
     }
 
-    pub fn get_chunk(&self, name: &str) -> Option<String> {
-        self.chunks.read().get(name).cloned()
+    pub fn get_chunk(&self, name: &str) -> Option<ChunkAsset> {
+        let chunks = self.chunks.read();
+
+        let candidates = [
+            Some(name),
+            name.strip_prefix('/'),
+            name.strip_prefix("__chunks/"),
+            name.strip_prefix("/_chunks/"),
+            name.strip_prefix("/__chunks/"),
+        ];
+
+        for candidate in candidates.into_iter().flatten() {
+            if let Some(chunk) = chunks.get(candidate) {
+                return Some(chunk.clone());
+            }
+        }
+
+        None
     }
 
+    #[allow(dead_code)]
     pub fn list_chunks(&self) -> Vec<String> {
         self.chunks.read().keys().cloned().collect()
     }
@@ -46,12 +76,26 @@ impl ChunkManager {
         debug!("Cleared chunk cache");
     }
 
+    #[allow(dead_code)]
     pub fn chunk_count(&self) -> usize {
         self.chunks.read().len()
     }
 
+    #[allow(dead_code)]
     pub fn has_chunk(&self, name: &str) -> bool {
-        self.chunks.read().contains_key(name)
+        let chunks = self.chunks.read();
+        let candidates = [
+            Some(name),
+            name.strip_prefix('/'),
+            name.strip_prefix("__chunks/"),
+            name.strip_prefix("/_chunks/"),
+            name.strip_prefix("/__chunks/"),
+        ];
+
+        candidates
+            .into_iter()
+            .flatten()
+            .any(|candidate| chunks.contains_key(candidate))
     }
 }
 
@@ -65,25 +109,36 @@ pub struct ChunkProcessor;
 
 impl ChunkProcessor {
     pub fn process_assets(
-        assets: &Vec<Output>,
+        assets: &[Output],
         source_path: &PathBuf,
-    ) -> Result<(String, HashMap<String, String>), String> {
-        let mut main_output = None;
+    ) -> Result<(MainAsset, HashMap<String, ChunkAsset>), String> {
+        let mut main_output: Option<MainAsset> = None;
         let mut chunks = HashMap::new();
 
         for asset in assets {
             let content = String::from_utf8(asset.content_as_bytes().to_vec())
                 .map_err(|e| format!("Failed to convert asset to UTF-8: {}", e))?;
             let filename = asset.filename();
+            let content_type = guess_content_type(filename);
 
             debug!("Processing asset: {}", filename);
 
             if Self::is_main_output(filename, source_path) {
                 debug!("Identified main output: {}", filename);
-                main_output = Some(content);
+                main_output = Some(MainAsset {
+                    filename: filename.to_string(),
+                    content,
+                    content_type: content_type.to_string(),
+                });
             } else {
                 debug!("Storing as chunk: {}", filename);
-                chunks.insert(filename.to_string(), content);
+                chunks.insert(
+                    filename.to_string(),
+                    ChunkAsset {
+                        content,
+                        content_type: content_type.to_string(),
+                    },
+                );
             }
         }
 
@@ -110,16 +165,37 @@ impl ChunkProcessor {
         false
     }
 
-    fn find_fallback_output(assets: &[Output]) -> Result<Option<String>, String> {
+    fn find_fallback_output(assets: &[Output]) -> Result<Option<MainAsset>, String> {
         for asset in assets {
             let filename = asset.filename();
             if filename.ends_with(".js") {
                 debug!("Fallback: using first JS asset: {}", filename);
                 let content = String::from_utf8(asset.content_as_bytes().to_vec())
                     .map_err(|e| format!("Failed to convert fallback asset to UTF-8: {}", e))?;
-                return Ok(Some(content));
+                return Ok(Some(MainAsset {
+                    filename: filename.to_string(),
+                    content,
+                    content_type: guess_content_type(filename).to_string(),
+                }));
             }
         }
         Ok(None)
+    }
+}
+
+fn guess_content_type(filename: &str) -> &'static str {
+    match Path::new(filename)
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("js") | Some("mjs") | Some("cjs") | Some("jsx") | Some("ts") | Some("tsx") => {
+            "application/javascript"
+        }
+        Some("css") => "text/css",
+        Some("html") => "text/html",
+        Some("json") => "application/json",
+        _ => "application/octet-stream",
     }
 }

@@ -7,6 +7,8 @@ use clap::Parser;
 use log::{info, LevelFilter};
 use palladin_server::server::{Server, ServerConfig};
 use palladin_shared::{canonicalize_with_strip, PalladinResult};
+use std::env::set_current_dir;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -32,31 +34,17 @@ async fn main() -> PalladinResult {
             root,
             entrypoint,
         } => {
+            let root = canonicalize_with_strip(&root)?;
+            set_current_dir(&root)?;
+
             let mut config = ServerConfig::new()
                 .with_host(host)
                 .with_port(port)
-                .with_root(root);
+                .with_root(root)
+                .with_entrypoint(entrypoint);
 
-            if let Some(entry) = entrypoint {
-                config = config.with_entrypoint(canonicalize_with_strip(entry)?);
-            }
-
-            info!(target: "server", "initializing...");
-
-            let server = Server::new(config)?;
-
-            let mut watcher = server.create_watcher()?;
-            watcher.watch(server.context().root())?;
-
+            let server = Arc::new(Server::new(config)?);
             info!(target: "server", "server running on http://{}", server.context().address());
-            info!(target: "server", "watching for file changes...");
-
-            let server = Arc::new(server);
-
-            let watcher_server = server.clone();
-            tokio::spawn(async move {
-                watcher_server.watch_files(watcher).await;
-            });
 
             server.serve().await
         }

@@ -6,7 +6,6 @@ export function App() {
 
     return (
         <div style={{textAlign: "center"}}>
-            <h1>Simp Counter</h1>
             <p>Current count: {count}</p>
             <button onClick={() => setCount(count + 1)}>Increment</button>
         </div>
