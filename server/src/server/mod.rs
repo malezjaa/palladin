@@ -85,55 +85,69 @@ impl Server {
             watcher.ignored_paths()
         );
 
+        let mut pending_changes = std::collections::HashSet::new();
+        let mut last_change_time: Option<SystemTime> = None;
+        let debounce_duration = Duration::from_millis(150);
+
         loop {
+            let mut had_events = false;
+
             watcher.process_filtered_events(|event| {
                 use notify::EventKind;
 
                 match event.kind {
                     EventKind::Create(_) | EventKind::Modify(_) => {
                         for path in event.paths {
-                            println!("{:?}", path);
-                            println!("{:?}", self.ctx.is_within_root(&path));
                             if self.ctx.is_within_root(&path) {
-                                self.invalidate_file(&path);
+                                pending_changes.insert(path);
+                                last_change_time = Some(SystemTime::now());
+                                had_events = true;
                             }
                         }
                     }
                     _ => {}
                 }
             });
+            if let Some(last_time) = last_change_time {
+                if !pending_changes.is_empty() {
+                    let elapsed = SystemTime::now()
+                        .duration_since(last_time)
+                        .unwrap_or(Duration::ZERO);
+
+                    if elapsed >= debounce_duration {
+                        let changed_files: Vec<PathBuf> = pending_changes.drain().collect();
+                        if !changed_files.is_empty() {
+                            self.handle_file_changes(changed_files);
+                        }
+                        last_change_time = None;
+                    }
+                }
+            }
 
             sleep(Duration::from_millis(50)).await;
         }
     }
 
-    fn invalidate_file(&self, path: &PathBuf) {
-        let relative_path = self
-            .ctx
-            .root()
-            .parent()
-            .and_then(|root| path.strip_prefix(root).ok())
-            .unwrap_or(path);
-
-        debug!("Rebuilding entrypoint...");
-        if let Err(e) = self.rolldown_pipe.bundle_entrypoint() {
-            log::error!("Failed to rebuild entrypoint: {:?}", e);
-        } else {
-            debug!("Entrypoint rebuilt successfully");
+    fn handle_file_changes(&self, paths: Vec<PathBuf>) {
+        for path in &paths {
+            let relative_path = self
+                .ctx
+                .root()
+                .parent()
+                .and_then(|root| path.strip_prefix(root).ok())
+                .unwrap_or(path);
+            info!("File changed: {}", relative_path.display());
         }
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        info!("Rebuilding entrypoint...");
+        if let Err(e) = self.rolldown_pipe.bundle_entrypoint() {
+            log::error!("Failed to rebuild entrypoint: {:?}", e);
+            return;
+        }
+        info!("Entrypoint rebuilt successfully");
 
-        let _ = self.hmr_tx.send(HmrMessage::Update {
-            updates: vec![Update {
-                path: format!("/{}", relative_path.display()).replace('\\', "/"),
-                timestamp,
-            }],
-        });
+        self.files.write().clear();
 
-        info!("File changed: {}", relative_path.display());
+        let _ = self.hmr_tx.send(HmrMessage::FullReload);
     }
 }
